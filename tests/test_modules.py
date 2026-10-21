@@ -156,13 +156,26 @@ class FirewallTests(unittest.TestCase):
 
 
 class SshTests(unittest.TestCase):
+    SSH_ACTIVE = (("systemctl", "is-active", "ssh"), (0, "active\n"))
+
     def test_dropin_validates_before_reloading(self):
-        plan = BY_ID["ssh"].plan(ctx_for(server()))
+        plan = BY_ID["ssh"].plan(ctx_for(server(responses=[self.SSH_ACTIVE])))
         write = kinds(plan, act.WriteFile)[0]
         self.assertEqual(write.path, "/etc/ssh/sshd_config.d/00-privatetoolbox.conf")
         self.assertEqual(write.validate, ["sshd", "-t"])
         self.assertEqual(write.after, ["systemctl", "reload", "ssh"])
         self.assertIn("MaxAuthTries 3", write.content)
+
+    def test_a_stopped_daemon_is_not_reloaded(self):
+        write = kinds(BY_ID["ssh"].plan(ctx_for(server())), act.WriteFile)[0]
+        self.assertIsNone(write.after)
+        self.assertEqual(write.validate, ["sshd", "-t"])
+
+    def test_privilege_separation_dir_is_created_for_the_check(self):
+        plan = BY_ID["ssh"].plan(ctx_for(server()))
+        self.assertEqual(commands(plan)[0], ["mkdir", "-p", "/run/sshd"])
+        running = server(files={"/run/sshd/.keep": ""})
+        self.assertEqual(commands(BY_ID["ssh"].plan(ctx_for(running))), [])
 
     def test_root_password_login_stays_without_any_key(self):
         s = server()

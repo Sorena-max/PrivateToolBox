@@ -3,7 +3,7 @@
 import re
 
 from .. import netinfo
-from ..actions import Plan, WriteFile
+from ..actions import Plan, Run, WriteFile
 from .base import Module
 
 DROPIN = "/etc/ssh/sshd_config.d/00-privatetoolbox.conf"
@@ -94,10 +94,17 @@ class Ssh(Module):
             lines += ["Port %d" % p for p in ports]
             notes.append(("ssh_ports", {"ports": ", ".join(str(p) for p in ports)}))
 
-        reload_cmd = ["systemctl", "reload", ctx.service_name_ssh()]
-        action = WriteFile(DROPIN, "\n".join(lines) + "\n", validate=["sshd", "-t"],
-                           after=reload_cmd, undo_after=reload_cmd)
-        return Plan(self.id, [action], notes=notes, warnings=warnings)
+        service = ctx.service_name_ssh()
+        # Reload only a running daemon; a stopped one reads the file when it starts.
+        reload_cmd = ["systemctl", "reload", service] if ctx.is_active(service) else None
+        actions = []
+        if not s.exists("/run/sshd"):
+            # `sshd -t` needs its privilege separation directory, which only exists
+            # while the daemon runs.
+            actions.append(Run(["mkdir", "-p", "/run/sshd"], undo=["rmdir", "/run/sshd"]))
+        actions.append(WriteFile(DROPIN, "\n".join(lines) + "\n", validate=["sshd", "-t"],
+                                 after=reload_cmd, undo_after=reload_cmd))
+        return Plan(self.id, actions, notes=notes, warnings=warnings)
 
     def verify(self, ctx):
         code, out = ctx.system.run(["sshd", "-T"], timeout=10)
