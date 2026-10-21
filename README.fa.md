@@ -28,12 +28,12 @@ curl -fsSL https://raw.githubusercontent.com/Sorena-max/PrivateToolBox/main/inst
 ```
 
 این فقط فایل ها را در `/opt/privatetoolbox` میگذارد و دستور `privatetoolbox` را اضافه میکند. تنظیمات سرور را
-عوض نمیکند. برای نصب یک نسخه مشخص بعد از `bash -s --` گزینه `--ref v0.1.0` را اضافه کن.
+عوض نمیکند و آخر کار پیشنهاد میدهد منو را همان لحظه باز کند. برای نصب یک نسخه مشخص بعد از `bash -s --` گزینه `--ref v0.1.0` را اضافه کن.
 
 ## استفاده
 
 ```bash
-sudo privatetoolbox                         # منوی تعاملی
+sudo privatetoolbox                         # منو: گزینه ها و کار هر کدام را نشان میدهد
 sudo privatetoolbox scan                    # امتیاز و یافته ها، فقط خواندن
 sudo privatetoolbox plan --profile vpn      # نشان بده چه چیزی عوض میشود
 sudo privatetoolbox apply --profile vpn     # اعمال (اول میپرسد و تایمر برگشت را میسازد)

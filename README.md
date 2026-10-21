@@ -26,12 +26,12 @@ curl -fsSL https://raw.githubusercontent.com/Sorena-max/PrivateToolBox/main/inst
 ```
 
 This only copies files to `/opt/privatetoolbox` and adds the `privatetoolbox` command. It does not change
-your server. To install a fixed release, add `--ref v0.1.0` after `bash -s --`.
+your server. At the end it offers to open the menu right away. To install a fixed release, add `--ref v0.1.0` after `bash -s --`.
 
 ## Use
 
 ```bash
-sudo privatetoolbox                         # interactive menu
+sudo privatetoolbox                         # menu: shows the choices and what each one does
 sudo privatetoolbox scan                    # score and findings, read only
 sudo privatetoolbox plan --profile vpn      # show what would change
 sudo privatetoolbox apply --profile vpn     # apply (asks first, arms the rollback timer)

@@ -20,7 +20,7 @@ def checker_system(**kw):
                   responses=responses, **kw)
 
 
-def make_app(system=None, answers=None, keep="", benchmark=None, **kw):
+def make_app(system=None, answers=None, keep="", benchmark=None, eof=False, **kw):
     system = system or server()
     ui, stream = quiet_ui()
     queue = list(answers or [])
@@ -28,6 +28,8 @@ def make_app(system=None, answers=None, keep="", benchmark=None, **kw):
 
     def answer(prompt):
         asked.append(prompt)
+        if eof and not queue:
+            raise EOFError
         return queue.pop(0) if queue else ""
     app = cli.App(system=system, ui=ui, input_fn=answer, ask_keep=lambda seconds: keep,
                   dns_benchmark=benchmark)
@@ -98,10 +100,68 @@ class ReadOnlyCommandTests(unittest.TestCase):
         self.assertIn("cloudflare", output(app))
         self.assertIn("no answer", output(app))
 
-    def test_menu_runs_a_scan_and_exits(self):
-        app = make_app(answers=["1", "0"])
+    def test_menu_lists_every_choice_with_a_description(self):
+        system = server(responses=[(("id", "-u", "privatechecker"), (1, ""))])
+        app = make_app(system, answers=["0"], eof=True)
+        self.assertEqual(run(app, "menu"), 0)
+        text = output(app)
+        for label in ("Scan this server", "Apply the recommended set", "Apply the VPN server profile",
+                      "Apply the web server profile", "Apply the bot server profile",
+                      "Apply the game server profile", "Choose modules yourself", "Test DNS speed",
+                      "Check that everything works", "Show past runs", "Undo the last change", "Exit"):
+            self.assertIn(label, text)
+        self.assertIn("read only, shows a score", text)
+        self.assertNotIn("PrivateChecker bot", text)          # no PrivateChecker here, so no Telegram row
+
+    def test_the_telegram_choice_appears_only_with_privatechecker(self):
+        system = server(responses=[(("id", "-u", "privatechecker"), (0, "999\n"))])
+        app = make_app(system, answers=["0"], eof=True)
+        run(app, "menu")
+        self.assertIn("Add the PrivateToolBox button to your PrivateChecker bot", output(app))
+
+    def test_a_scan_from_the_menu_comes_back_to_the_menu(self):
+        app = make_app(answers=["1", "", "0"], eof=True)
         self.assertEqual(run(app, "menu"), 0)
         self.assertIn("Score", output(app))
+        self.assertEqual(output(app).count("What do you want to do?"), 2)
+
+    def test_a_profile_from_the_menu_shows_the_plan_and_asks(self):
+        system = server()
+        app = make_app(system, answers=["2", "n", "", "0"], eof=True)
+        run(app, "menu")
+        self.assertIn("What will change", output(app))
+        self.assertIn("Apply these changes?", "".join(app.asked))
+        self.assertEqual(system.sysctl_get("net.ipv4.tcp_congestion_control"), "cubic")
+
+    def test_choosing_modules_by_number(self):
+        system = server()
+        app = make_app(system, answers=["7", "2", "y", "", "0"], eof=True)       # 2 = bbr
+        run(app, "menu")
+        self.assertEqual(system.sysctl_get("net.ipv4.tcp_congestion_control"), "bbr")
+        self.assertIn("faster connections on long routes", output(app))
+
+    def test_choosing_nothing_applies_nothing(self):
+        system = server()
+        app = make_app(system, answers=["7", "99 abc", "", "0"], eof=True)
+        run(app, "menu")
+        self.assertIn("Nothing selected", output(app))
+        self.assertEqual(system.sysctl_get("net.ipv4.tcp_congestion_control"), "cubic")
+
+    def test_a_bad_choice_is_explained_and_the_menu_stays(self):
+        app = make_app(answers=["42", "0"], eof=True)
+        self.assertEqual(run(app, "menu"), 0)
+        self.assertIn("Not a valid choice", output(app))
+
+    def test_closing_the_terminal_leaves_quietly(self):
+        app = make_app(answers=[], eof=True)
+        self.assertEqual(run(app, "menu"), 0)
+        self.assertIn("Bye", output(app))
+
+    def test_dns_test_from_the_menu(self):
+        rows = [{"id": "cloudflare", "ips": [], "median_ms": 9.0, "fail": 0, "total": 10}]
+        app = make_app(answers=["8", "", "0"], eof=True, benchmark=lambda: rows)
+        run(app, "menu")
+        self.assertIn("cloudflare", output(app))
 
 
 class ApplyTests(unittest.TestCase):
@@ -389,7 +449,7 @@ class ScanReportTests(unittest.TestCase):
         self.assertFalse(send.called)
 
     def test_the_menu_scan_asks_too(self):
-        app, send = self.ask(checker_system(), ["menu"], ["1", "y", "0"])
+        app, send = self.ask(checker_system(), ["menu"], ["1", "y", "", "0"])
         self.assertTrue(send.called)
 
 if __name__ == "__main__":

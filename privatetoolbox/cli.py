@@ -443,31 +443,85 @@ class App:
         return 0
 
     # menu -------------------------------------------------------------
+    PROFILE_ENTRIES = (("2", "recommended"), ("3", "vpn"), ("4", "web"), ("5", "bot"), ("6", "game"))
+
+    def menu_entries(self):
+        """(key, label, description) rows; the Telegram row only shows when it makes sense."""
+        rows = [("1", "menu_scan", "menu_scan_d")]
+        rows += [(key, "menu_" + name, "menu_%s_d" % name) for key, name in self.PROFILE_ENTRIES]
+        rows += [("7", "menu_custom", "menu_custom_d"), ("8", "menu_dns", "menu_dns_d"),
+                 ("9", "menu_verify", "menu_verify_d"), ("10", "menu_history", "menu_history_d"),
+                 ("11", "menu_undo", "menu_undo_d")]
+        code, _ = self.system.run(["id", "-u", bridge.CHECKER_USER], timeout=10)
+        if code == 0:
+            rows.append(("12", "menu_telegram", "menu_telegram_d"))
+        return rows
+
+    def pick_modules_interactively(self):
+        """Let the person choose modules by number. Returns a list of module ids."""
+        self.ui.heading(self.tr("menu_custom"))
+        for index, module in enumerate(mods.ALL, 1):
+            self.ui.p("   %2d) %-18s %s" % (index, self.title(module.id),
+                                          self.ui.dim(self.tr("mod_%s_d" % module.id))))
+        answer = self.input_fn(self.tr("menu_pick")).strip().lower()
+        if answer in ("all", "a"):
+            return [m.id for m in mods.ALL if m.id != "ipv6"]
+        chosen = []
+        for token in answer.replace(",", " ").split():
+            if token.isdigit() and 1 <= int(token) <= len(mods.ALL):
+                module_id = mods.ALL[int(token) - 1].id
+                if module_id not in chosen:
+                    chosen.append(module_id)
+        return chosen
+
+    def run_menu_choice(self, choice, parser):
+        if choice == "1":
+            self.scan_cmd(parser.parse_args(["scan"]))
+        elif choice in dict(self.PROFILE_ENTRIES):
+            self.apply_cmd(parser.parse_args(["apply", "--profile", dict(self.PROFILE_ENTRIES)[choice]]))
+        elif choice == "7":
+            chosen = self.pick_modules_interactively()
+            if chosen:
+                self.apply_cmd(parser.parse_args(["apply"] + chosen))
+            else:
+                self.ui.warn(self.tr("no_modules"))
+        elif choice == "8":
+            self.dns_test()
+        elif choice == "9":
+            self.verify_cmd(parser.parse_args(["verify"]))
+        elif choice == "10":
+            self.history_cmd()
+        elif choice == "11":
+            self.undo_cmd(parser.parse_args(["undo"]))
+        elif choice == "12":
+            self.integrate_cmd(parser.parse_args(["integrate"]))
+        else:
+            self.ui.warn(self.tr("bad_choice"))
+
     def menu(self):
         self.ui.banner(self.lang, __version__)
-        entries = [("1", "menu_scan"), ("2", "menu_recommended"), ("3", "menu_vpn"),
-                   ("4", "menu_dns"), ("5", "menu_undo"), ("0", "menu_exit")]
         parser = make_parser()
-        while True:
-            self.ui.heading(self.tr("menu_title"))
-            for key, label in entries:
-                self.ui.p("   %s) %s" % (key, self.tr(label)))
-            choice = self.input_fn("> ").strip()
-            if choice == "1":
-                self.scan_cmd(parser.parse_args(["scan"]))
-            elif choice == "2":
-                self.apply_cmd(parser.parse_args(["apply", "--profile", "recommended"]))
-            elif choice == "3":
-                self.apply_cmd(parser.parse_args(["apply", "--profile", "vpn"]))
-            elif choice == "4":
-                self.dns_test()
-            elif choice == "5":
-                self.undo_cmd(parser.parse_args(["undo"]))
-            elif choice in ("0", "q", ""):
-                return 0
-            else:
-                self.ui.warn(self.tr("bad_choice"))
-
+        try:
+            while True:
+                entries = self.menu_entries()
+                self.ui.heading(self.tr("menu_title"))
+                for key, label, description in entries:
+                    self.ui.p("  %3s) %-34s %s" % (key, self.tr(label), self.ui.dim(self.tr(description))))
+                self.ui.p("  %3s) %s" % ("0", self.tr("menu_exit")))
+                choice = self.input_fn("\n> ").strip()
+                if choice in ("0", "q", "quit", "exit"):
+                    return 0
+                if choice == "":
+                    continue
+                if choice not in [row[0] for row in entries]:
+                    self.ui.warn(self.tr("bad_choice"))
+                    continue
+                self.run_menu_choice(choice, parser)
+                self.input_fn("\n" + self.tr("menu_continue"))
+        except (EOFError, KeyboardInterrupt):
+            self.ui.p("")
+            self.ui.info(self.tr("menu_bye"))
+            return 0
 
 def main(argv=None, app=None):
     parser = make_parser()

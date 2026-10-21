@@ -9,7 +9,7 @@
 
 set -Eeuo pipefail
 
-PT_VERSION="0.1.1"
+PT_VERSION="0.1.0"
 REPO_SLUG="Sorena-max/PrivateToolBox"
 APP_DIR="/opt/privatetoolbox"
 STATE_DIR="/var/lib/privatetoolbox"
@@ -254,6 +254,17 @@ offer_bridge() {
   esac
 }
 
+offer_menu() {
+  if [ "$NON_INTERACTIVE" -eq 1 ] || ! have_tty; then return 0; fi
+  local answer
+  printf "\n"
+  prompt answer "  Open PrivateToolBox now? [Y/n] "
+  case "$answer" in
+    n|N|no|NO) info "Start it any time with: sudo privatetoolbox" ;;
+    *) "$BIN_FILE" menu </dev/tty || true ;;
+  esac
+}
+
 fetch_source() {
   if [ -n "$LOCAL_SOURCE" ]; then
     SRC="$(cd "$LOCAL_SOURCE" && pwd)"
@@ -334,6 +345,7 @@ do_install() {
   step 4 4 "Ready"
   finish_screen
   offer_bridge
+  offer_menu
 }
 
 do_uninstall() {
