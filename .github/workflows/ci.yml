@@ -39,7 +39,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install
-        run: sudo bash install.sh --non-interactive --fast --local-source "$PWD" --lang en
+        run: sudo bash install.sh --non-interactive --fast --local-source "$PWD"
       - name: Read-only commands
         run: |
           sudo privatetoolbox version

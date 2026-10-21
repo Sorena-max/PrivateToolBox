@@ -10,9 +10,12 @@ exactly what it would change, applies it, and undoes everything by itself if som
 - ⏪ **Undo anything**: each run is journaled, `privatetoolbox undo` puts every file and setting back
 - 🛟 **Automatic rollback** that does not need your terminal: risky changes arm a systemd timer, and if you
   do not confirm in time (even if your SSH session died) the server goes back to how it was
-- 🌐 Persian and English
-- 🇮🇷 Optional check that Iran can still reach the server after the change, and an optional report to your
-  [PrivateChecker](https://github.com/Sorena-max/PrivateChecker) bot
+- 🇮🇷 Optional check that Iran can still reach the server after the change
+- 🤖 Works with [PrivateChecker](https://github.com/Sorena-max/PrivateChecker): it offers to send the
+  report to your Telegram bot, and you can run PrivateToolBox from a button inside that bot
+
+The terminal is in English on purpose (terminals draw Persian badly). Reports sent to your Telegram bot use
+the language of your PrivateChecker bot, Persian or English.
 
 ## Install
 
@@ -46,6 +49,26 @@ What `apply` does on a server where SSH or the firewall changes:
 5. if you do not, the timer undoes the whole run
 
 With `--yes` (for scripts) it keeps the changes only if every check passed, otherwise the timer rolls them back.
+
+## With PrivateChecker (Telegram)
+
+If a [PrivateChecker](https://github.com/Sorena-max/PrivateChecker) bot is running on the same server:
+
+- **Reports:** after `apply` or `verify`, PrivateToolBox notices it and asks
+  `Send this report to your Telegram bot? [y/N]`. Nothing is sent unless you say yes (or pass `--notify`).
+  Reports contain a summary and check results, never passwords, keys or tokens.
+- **A button in the bot:** `sudo privatetoolbox integrate` adds a PrivateToolBox button to your bot
+  (the installer offers it too). From it the **owner** can scan, preview, apply a profile, keep or undo changes.
+  Applying from the bot always arms the rollback timer and waits for a Keep tap, so a bad change undoes itself.
+- Remove the button any time with `sudo privatetoolbox integrate --remove`.
+
+How the button is wired: a small root service (`privatetoolbox-agent`) listens on a Unix socket that only
+the `privatetoolbox` group can open, and only the `privatechecker` service user is added to that group.
+It accepts a short list of commands, checks every value against a fixed list or pattern, and runs
+`privatetoolbox` without a shell, so a request cannot add its own options.
+
+About encryption: the connection to Telegram is encrypted with TLS, but Telegram bot messages are not
+end-to-end encrypted. That is why reports never include secrets.
 
 ## Modules
 

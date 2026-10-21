@@ -77,10 +77,12 @@ sudo privatetoolbox apply --profile recommended
 - 🔢 **پورت دوم برای SSH:** `sudo privatetoolbox apply ssh firewall --ssh-port 2222`
 - 🏎 **فقط تست DNS:** `sudo privatetoolbox dns-test`
 - 🇮🇷 **ایران به من میرسد؟** `sudo privatetoolbox verify --iran`
-- 📲 **ارسال نتیجه به تلگرام:** `--notify` را اضافه کن (PrivateChecker باید روی همین سرور باشد)
+- 📲 **ارسال نتیجه به تلگرام:** اگر PrivateChecker روی همین سرور باشد بعد از `apply` و `verify` خودش میپرسد
+- 🤖 **استفاده از داخل ربات:** `sudo privatetoolbox integrate` دکمه 🧰 PrivateToolBox را به ربات PrivateChecker اضافه میکند
+  (فقط مالک). اسکن کن، پیش نمایش ببین، اعمال کن، و تا 3 دقیقه دکمه ✅ Keep را بزن وگرنه خودش برمیگردد
+- 🔌 **برداشتن دکمه ربات:** `sudo privatetoolbox integrate --remove`
 - ⏪ **نظرم عوض شد:** `sudo privatetoolbox undo`
 - 🕘 **قبلا چه چیزی را عوض کردم؟** `sudo privatetoolbox history`
-- 🌍 **تغییر زبان:** `sudo privatetoolbox lang fa` یا `lang en`
 
 ## 🆘 مشکل ها
 

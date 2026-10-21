@@ -13,13 +13,11 @@ PT_VERSION="0.1.0"
 REPO_SLUG="Sorena-max/PrivateToolBox"
 APP_DIR="/opt/privatetoolbox"
 STATE_DIR="/var/lib/privatetoolbox"
-CONF_DIR="/etc/privatetoolbox"
 BIN_FILE="/usr/local/bin/privatetoolbox"
 MIN_PY="3.8"
 
 COMMAND="install"
 REF="${PT_REF:-main}"
-LANG_CODE="${PT_LANG:-}"
 LOCAL_SOURCE=""
 NON_INTERACTIVE=0
 PURGE=0
@@ -142,8 +140,7 @@ PrivateToolBox installer
 Usage: install.sh [install|update|uninstall] [options]
 
 Options:
-  --lang fa|en         interface language (default: ask, then Persian)
-  --ref REF            git branch or tag to install (default: main)
+  --ref REF           git branch or tag to install (default: main)
   --purge              with uninstall: also delete history and settings
   --no-clear           do not clear the screen at the start
   --fast               no animation or pauses (the default when not run by a person)
@@ -151,7 +148,7 @@ Options:
   --local-source DIR   install from a local checkout (development / CI)
   -h, --help           show this help
 
-Piped install with flags:  curl -fsSL <url> | sudo bash -s -- --lang en --non-interactive
+Piped install with flags:  curl -fsSL <url> | sudo bash -s -- --non-interactive
 EOF
 }
 
@@ -161,7 +158,6 @@ parse_args() {
   fi
   while [ $# -gt 0 ]; do
     case "$1" in
-      --lang) LANG_CODE="${2:?--lang needs a value}"; shift 2 ;;
       --ref) REF="${2:?--ref needs a value}"; shift 2 ;;
       --local-source) LOCAL_SOURCE="${2:?--local-source needs a value}"; shift 2 ;;
       --non-interactive|--yes|-y) NON_INTERACTIVE=1; shift ;;
@@ -238,24 +234,24 @@ prompt() {  # prompt VAR "text"
   printf -v "$__var" '%s' "$__value"
 }
 
-choose_language() {
-  if [ -z "$LANG_CODE" ]; then
-    if [ "$NON_INTERACTIVE" -eq 1 ] || ! have_tty; then
-      LANG_CODE="fa"
-    else
-      printf '\n  %sInterface language%s\n' "$C_BLD" "$C_OFF"
-      nap 0.3
-      printf '    1) Persian  %s(default)%s\n    2) English\n\n' "$C_DIM" "$C_OFF"
-      local choice
-      prompt choice "  Choose [1]: "
-      case "$choice" in 2|en|EN|English) LANG_CODE="en" ;; *) LANG_CODE="fa" ;; esac
-    fi
+checker_active() {
+  command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet privatechecker 2>/dev/null
+}
+
+offer_bridge() {
+  checker_active || return 0
+  printf '\n  %sPrivateChecker is running on this server.%s\n' "$C_BLD" "$C_OFF"
+  info "PrivateToolBox can also be used from inside your Telegram bot (owner only)."
+  if [ "$NON_INTERACTIVE" -eq 1 ] || ! have_tty; then
+    info "To enable it later: sudo privatetoolbox integrate"
+    return 0
   fi
-  case "$LANG_CODE" in
-    fa|en) ;;
-    *) warn "unknown language '$LANG_CODE', using fa"; LANG_CODE="fa" ;;
+  local answer
+  prompt answer "  Add the PrivateToolBox button to your PrivateChecker bot? [y/N] "
+  case "$answer" in
+    y|Y|yes|YES) "$BIN_FILE" integrate --yes || warn "could not enable it, try: sudo privatetoolbox integrate" ;;
+    *) info "Skipped. Enable it any time with: sudo privatetoolbox integrate" ;;
   esac
-  ok "Language: $([ "$LANG_CODE" = "fa" ] && echo Persian || echo English)"
 }
 
 fetch_source() {
@@ -287,8 +283,6 @@ deploy() {
   find "$APP_DIR" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
   chown -R root:root "$APP_DIR"
   install -d -m 700 "$STATE_DIR"
-  install -d -m 755 "$CONF_DIR"
-  printf '%s\n' "$LANG_CODE" >"$CONF_DIR/lang"
   ok "Files installed in $APP_DIR ${C_DIM}(owned by root)${C_OFF}"
 }
 
@@ -329,7 +323,6 @@ do_install() {
   step 1 4 "Checking this server"
   ok "$(os_name) ${C_DIM}|${C_OFF} running as root"
   ensure_prereqs
-  choose_language
 
   step 2 4 "Downloading"
   fetch_source
@@ -340,6 +333,7 @@ do_install() {
 
   step 4 4 "Ready"
   finish_screen
+  offer_bridge
 }
 
 do_uninstall() {
@@ -348,7 +342,7 @@ do_uninstall() {
   rm -f "$BIN_FILE"
   rm -rf "$APP_DIR"
   if [ "$PURGE" -eq 1 ]; then
-    rm -rf "$STATE_DIR" "$CONF_DIR"
+    rm -rf "$STATE_DIR"
     ok "Removed everything, including history and settings"
   else
     ok "Removed the program ${C_DIM}(history kept in $STATE_DIR; use --purge to delete)${C_OFF}"

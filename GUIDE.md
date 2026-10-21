@@ -75,10 +75,12 @@ Or choose modules yourself: `sudo privatetoolbox apply bbr dns firewall`
 - 🔢 **Add a second SSH port:** `sudo privatetoolbox apply ssh firewall --ssh-port 2222`
 - 🏎 **Only test DNS:** `sudo privatetoolbox dns-test`
 - 🇮🇷 **Can Iran reach me?** `sudo privatetoolbox verify --iran`
-- 📲 **Send the result to Telegram:** add `--notify` (needs PrivateChecker on the same server)
+- 📲 **Send the result to Telegram:** with PrivateChecker on the same server it asks you after `apply` and `verify`
+- 🤖 **Use it from your bot:** `sudo privatetoolbox integrate` adds a 🧰 PrivateToolBox button to your PrivateChecker
+  bot (owner only). Scan, preview, apply, then tap ✅ Keep within 3 minutes or it undoes itself
+- 🔌 **Remove the bot button:** `sudo privatetoolbox integrate --remove`
 - ⏪ **I changed my mind:** `sudo privatetoolbox undo`
 - 🕘 **What did I change before?** `sudo privatetoolbox history`
-- 🌍 **Switch language:** `sudo privatetoolbox lang fa` or `lang en`
 
 ## 🆘 Problems
 

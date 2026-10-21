@@ -5,7 +5,7 @@ import select
 import sys
 import time
 
-from . import __version__, iran, notify, safety
+from . import __version__, bridge, integration, iran, notify, safety
 from . import modules as mods
 from .actions import Plan
 from .context import Context, Options
@@ -14,8 +14,6 @@ from .i18n import t
 from .modules.dns import benchmark
 from .system import System
 from .ui import UI
-
-LANG_FILE = "/etc/privatetoolbox/lang"
 
 
 def score(findings):
@@ -34,8 +32,14 @@ def split_list(values):
 def make_parser():
     p = argparse.ArgumentParser(prog="privatetoolbox",
                                 description="Safe hardening and tuning for a Linux server")
-    p.add_argument("--lang", choices=["en", "fa"], help="interface language")
+    # Terminals draw Persian badly, so output is English. Telegram reports are in
+    # your PrivateChecker language; --lang only exists for the Telegram bridge.
+    p.add_argument("--lang", choices=["en", "fa"], help=argparse.SUPPRESS)
     sub = p.add_subparsers(dest="command")
+    sub.add_parser("agent", help=argparse.SUPPRESS)
+    integrate = sub.add_parser("integrate", help="add or remove the PrivateToolBox button in your PrivateChecker bot")
+    integrate.add_argument("-y", "--yes", action="store_true")
+    integrate.add_argument("--remove", action="store_true")
     sub.add_parser("scan", help="read-only audit with a score")
     sub.add_parser("menu", help="interactive menu")
     sub.add_parser("version")
@@ -48,8 +52,7 @@ def make_parser():
     verify = sub.add_parser("verify", help="check that the applied settings work")
     verify.add_argument("--iran", action="store_true", help="also check reachability from Iran")
     verify.add_argument("--notify", action="store_true", help="send the result to PrivateChecker")
-    lang = sub.add_parser("lang", help="save the interface language")
-    lang.add_argument("code", choices=["en", "fa"])
+    verify.add_argument("--no-notify", action="store_true", help="do not offer to send the result")
 
     for name, help_text in (("plan", "show what would change"), ("apply", "make the changes")):
         sp = sub.add_parser(name, help=help_text)
@@ -70,7 +73,10 @@ def make_parser():
             sp.add_argument("-y", "--yes", action="store_true", help="do not ask")
             sp.add_argument("--rollback", type=int, default=safety.DEFAULT_SECONDS, metavar="SECONDS")
             sp.add_argument("--no-rollback", action="store_true")
-            sp.add_argument("--notify", action="store_true")
+            sp.add_argument("--hold", action="store_true",
+                            help="with --yes: never confirm by itself, wait for 'privatetoolbox confirm'")
+            sp.add_argument("--notify", action="store_true", help="send the report to PrivateChecker")
+            sp.add_argument("--no-notify", action="store_true", help="do not offer to send the report")
             sp.add_argument("--iran", action="store_true")
     return p
 
@@ -99,6 +105,7 @@ class App:
         self.dns_benchmark = dns_benchmark
         self.engine = Engine(self.system)
         self.lang = "en"
+        self.interactive = sys.stdin.isatty()
 
     # helpers ----------------------------------------------------------
     def tr(self, key, **params):
@@ -111,10 +118,7 @@ class App:
         if getattr(args, "lang", None):
             return args.lang
         env = self.system.env("PRIVATETOOLBOX_LANG")
-        if env in ("fa", "en"):
-            return env
-        saved = (self.system.read(LANG_FILE) or "").strip()
-        return saved if saved in ("fa", "en") else "en"
+        return env if env in ("fa", "en") else "en"
 
     def context(self, args=None):
         opts = options_from(args) if args is not None else Options()
@@ -276,12 +280,16 @@ class App:
             code = self.finish_rollback(run_id, args, all_ok)
         if args.iran:
             self.show_iran()
-        if args.notify:
-            self.send_notice(run_id, modules, before, after, results, code)
+        held = armed and args.yes and args.hold
+        self.send_to_checker(args, lambda lang: integration.apply_report(
+            lang, run_id, modules, before, after, results, held, code))
         return code
 
     def finish_rollback(self, run_id, args, all_ok):
         self.ui.p("")
+        if args.yes and args.hold:
+            self.ui.warn(self.tr("pending_hold", seconds=args.rollback))
+            return 0
         if args.yes:
             if all_ok:
                 safety.confirm(self.system, run_id)
@@ -298,14 +306,29 @@ class App:
         self.ui.warn(self.tr("rolled_back_pending"))
         return 3
 
-    def send_notice(self, run_id, modules, before, after, results, code):
-        failed = [self.title(m) for m, ok, _, _ in results if not ok]
-        lines = ["PrivateToolBox %s" % ("OK" if code == 0 and not failed else "CHECK"),
-                 "run %s: %s" % (run_id, ", ".join(modules)),
-                 "score %d -> %d" % (before, after)]
-        if failed:
-            lines.append("failed checks: " + ", ".join(failed))
-        notify.send(self.system, "\n".join(lines))
+    def send_to_checker(self, args, build_text):
+        """Offer to send a report to the PrivateChecker bot on this server.
+
+        With --notify it just sends. Without it, a person at a terminal is asked
+        first, and only if PrivateChecker is really running. Scripts (--yes) are
+        never asked.
+        """
+        if getattr(args, "no_notify", False):
+            return
+        if not getattr(args, "notify", False):
+            if getattr(args, "yes", False) or not self.interactive:
+                return
+            if not integration.checker_active(self.system):
+                return
+            answer = self.input_fn(self.tr("ask_send_checker"))
+            if answer.strip().lower() not in ("y", "yes"):
+                return
+        elif notify.checker_config(self.system) is None:
+            self.ui.warn(self.tr("checker_missing"))
+            return
+        lang = integration.checker_language(self.system)
+        sent = notify.send(self.system, build_text(lang))
+        (self.ui.ok if sent else self.ui.warn)(self.tr("sent_checker" if sent else "send_failed"))
 
     # other commands ---------------------------------------------------
     def undo_cmd(self, args):
@@ -355,9 +378,7 @@ class App:
         self.show_checks(configured)
         if args.iran:
             self.show_iran()
-        if args.notify:
-            bad = [self.title(m) for m, ok, _, _ in configured if not ok]
-            notify.send(self.system, "PrivateToolBox verify: %s" % ("all good" if not bad else ", ".join(bad)))
+        self.send_to_checker(args, lambda lang: integration.verify_report(lang, configured))
         return 0 if all(ok for _, ok, _, _ in configured) else 1
 
     def show_iran(self):
@@ -381,12 +402,35 @@ class App:
                 (self.ui.ok if row["fail"] == 0 else self.ui.warn)(line)
         return 0
 
-    def lang_cmd(self, code):
+    def integrate_cmd(self, args):
         if not self.need_root():
             return 2
-        self.system.write(LANG_FILE, code + "\n")
-        self.lang = code
-        self.ui.ok(self.tr("lang_saved"))
+        if args.remove:
+            ids = [i for i in self.engine.run_ids()
+                   if (self.engine.load(i) or {}).get("modules") == [bridge.MODULE_ID]
+                   and self.engine.load(i)["status"] == "applied"]
+            if not ids:
+                self.ui.warn(self.tr("integrate_none"))
+                return 1
+            self.engine.undo(ids[-1])
+            self.ui.ok(self.tr("integrate_removed"))
+            return 0
+        ctx = self.context()
+        plan = bridge.plan(ctx)
+        self.show_plans([plan])
+        if plan.empty:
+            return 1 if plan.skip and plan.skip[0] == "integrate_no_checker" else 0
+        self.ui.p("")
+        self.ui.info(self.tr("bridge_note"))
+        if not args.yes and self.input_fn(self.tr("ask_integrate")).strip().lower() not in ("y", "yes"):
+            self.ui.p(self.tr("cancelled"))
+            return 1
+        try:
+            self.engine.apply([plan])
+        except ApplyError as exc:
+            self.ui.bad(self.tr("apply_failed", error=exc))
+            return 1
+        self.ui.ok(self.tr("integrate_done"))
         return 0
 
     # menu -------------------------------------------------------------
@@ -444,6 +488,10 @@ def main(argv=None, app=None):
         return app.verify_cmd(args)
     if command == "dns-test":
         return app.dns_test()
-    if command == "lang":
-        return app.lang_cmd(args.code)
+    if command == "integrate":
+        return app.integrate_cmd(args)
+    if command == "agent":
+        from .agent import serve
+        serve()
+        return 0
     return 2

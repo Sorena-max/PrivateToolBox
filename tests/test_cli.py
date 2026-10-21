@@ -1,3 +1,4 @@
+import json
 import unittest
 from unittest import mock
 
@@ -8,14 +9,30 @@ from tests.helpers import quiet_ui, server
 UFW_ACTIVE = (("ufw", "status"), (0, "Status: active\n22/tcp ALLOW Anywhere\n443/tcp ALLOW Anywhere\n"))
 FIREWALLD_OFF = (("systemctl", "is-active", "firewalld"), (3, "inactive\n"))
 F2B_ON = (("systemctl", "is-active", "fail2ban"), (0, "active\n"))
+CHECKER_ON = (("systemctl", "is-active", "privatechecker"), (0, "active\n"))
+CHECKER_CONFIG = json.dumps({"token": "TOKEN", "owner_id": 42, "language": "fa"})
+
+
+def checker_system(**kw):
+    """A server that also runs a configured PrivateChecker bot."""
+    responses = [CHECKER_ON] + list(kw.pop("responses", []))
+    return server(files={"/var/lib/privatechecker/config.json": CHECKER_CONFIG},
+                  responses=responses, **kw)
 
 
 def make_app(system=None, answers=None, keep="", benchmark=None, **kw):
     system = system or server()
     ui, stream = quiet_ui()
     queue = list(answers or [])
-    app = cli.App(system=system, ui=ui, input_fn=lambda prompt: queue.pop(0) if queue else "",
-                  ask_keep=lambda seconds: keep, dns_benchmark=benchmark)
+    asked = []
+
+    def answer(prompt):
+        asked.append(prompt)
+        return queue.pop(0) if queue else ""
+    app = cli.App(system=system, ui=ui, input_fn=answer, ask_keep=lambda seconds: keep,
+                  dns_benchmark=benchmark)
+    app.interactive = False
+    app.asked = asked
     app.stream = stream
     return app
 
@@ -63,11 +80,11 @@ class ReadOnlyCommandTests(unittest.TestCase):
         self.assertIn("فایروال", output(app))
         self.assertIn("امتیاز", output(app))
 
-    def test_language_comes_from_the_saved_file(self):
-        system = server(files={"/etc/privatetoolbox/lang": "fa\n"})
-        app = make_app(system)
+    def test_terminal_output_is_english_by_default(self):
+        app = make_app()
         run(app, "scan")
-        self.assertIn("فایروال", output(app))
+        self.assertIn("Firewall", output(app))
+        self.assertNotRegex(output(app), "[\u0600-\u06ff]")
 
     def test_unknown_module(self):
         app = make_app()
@@ -177,10 +194,11 @@ class ApplyTests(unittest.TestCase):
         self.assertIn("Nothing to do", output(app))
 
     def test_notify_sends_a_summary(self):
-        app = make_app()
+        app = make_app(checker_system())
         with mock.patch.object(notify, "send") as send:
             run(app, "apply", "--yes", "--notify", "bbr")
-        self.assertIn("score", send.call_args[0][1])
+        self.assertIn(" -> ", send.call_args[0][1])
+        self.assertNotIn("TOKEN", send.call_args[0][1])
 
 
 class UndoAndHistoryTests(unittest.TestCase):
@@ -226,10 +244,113 @@ class VerifyTests(unittest.TestCase):
         self.assertIn("congestion control is bbr", output(app))
 
     def test_verify_notify(self):
-        app = make_app()
+        app = make_app(checker_system())
         with mock.patch.object(notify, "send") as send:
             run(app, "verify", "--notify")
-        self.assertIn("verify", send.call_args[0][1])
+        self.assertIn("PrivateToolBox", send.call_args[0][1])
+
+class PrivateCheckerReportTests(unittest.TestCase):
+    def ask(self, system, argv, answers, interactive=True):
+        app = make_app(system, answers=answers)
+        app.interactive = interactive
+        with mock.patch.object(notify, "send", return_value=True) as send:
+            code = run(app, *argv)
+        return app, send, code
+
+    def test_a_person_is_asked_when_privatechecker_is_running(self):
+        app, send, _ = self.ask(checker_system(), ["apply", "bbr"], ["y", "y"])
+        self.assertIn("Send this report to your Telegram bot", output(app) + "".join(app.asked))
+        self.assertTrue(send.called)
+
+    def test_saying_no_sends_nothing(self):
+        _, send, _ = self.ask(checker_system(), ["apply", "bbr"], ["y", "n"])
+        self.assertFalse(send.called)
+
+    def test_scripts_are_never_asked(self):
+        _, send, _ = self.ask(checker_system(), ["apply", "--yes", "bbr"], [])
+        self.assertFalse(send.called)
+
+    def test_no_notify_skips_the_question(self):
+        _, send, _ = self.ask(checker_system(), ["apply", "--no-notify", "bbr"], ["y"])
+        self.assertFalse(send.called)
+
+    def test_no_question_when_privatechecker_is_not_running(self):
+        _, send, _ = self.ask(server(), ["apply", "bbr"], ["y", "y"])
+        self.assertFalse(send.called)
+
+    def test_notify_without_privatechecker_warns(self):
+        app, send, _ = self.ask(server(), ["apply", "--yes", "--notify", "bbr"], [], interactive=False)
+        self.assertFalse(send.called)
+        self.assertIn("not set up", output(app))
+
+    def test_the_report_uses_the_bot_language(self):
+        _, send, _ = self.ask(checker_system(), ["apply", "--yes", "--notify", "bbr"], [], interactive=False)
+        text = send.call_args[0][1]
+        self.assertIn("امتیاز", text)                      # PrivateChecker is set to Persian
+        self.assertIn("BBR", text)
+
+    def test_the_report_holds_no_secrets(self):
+        _, send, _ = self.ask(checker_system(), ["apply", "--yes", "--notify", "bbr"], [], interactive=False)
+        self.assertNotIn("TOKEN", send.call_args[0][1])
+
+    def test_terminal_stays_english_when_the_bot_speaks_persian(self):
+        app, _, _ = self.ask(checker_system(), ["apply", "--yes", "--notify", "bbr"], [], interactive=False)
+        self.assertNotRegex(output(app), "[\u0600-\u06ff]")
+
+
+class HoldTests(unittest.TestCase):
+    def test_hold_applies_but_waits_for_confirmation(self):
+        system = server(responses=[UFW_ACTIVE, FIREWALLD_OFF])
+        app = make_app(system)
+        self.assertEqual(run(app, "apply", "--yes", "--hold", "firewall"), 0)
+        self.assertTrue(system.ran("ufw", "--force", "enable"))
+        self.assertFalse(any(c[:2] == ["systemctl", "stop"] and c[2].endswith(".timer")
+                             for c in system.commands))
+        self.assertIn("not kept yet", output(app))
+
+
+class IntegrateTests(unittest.TestCase):
+    CHECKER_USER = (("id", "-u", "privatechecker"), (0, "999\n"))
+
+    def test_needs_privatechecker(self):
+        system = server(responses=[(("id", "-u", "privatechecker"), (1, ""))])
+        self.assertEqual(run(make_app(system), "integrate", "--yes"), 1)
+        self.assertFalse(system.ran("groupadd"))
+
+    def test_sets_up_the_group_service_and_restarts_the_bot(self):
+        system = server(responses=[self.CHECKER_USER])
+        app = make_app(system)
+        self.assertEqual(run(app, "integrate", "--yes"), 0)
+        self.assertTrue(system.ran("groupadd", "-f", "privatetoolbox"))
+        self.assertTrue(system.ran("usermod", "-aG", "privatetoolbox", "privatechecker"))
+        self.assertIn("ExecStart=/usr/local/bin/privatetoolbox agent",
+                      system.read("/etc/systemd/system/privatetoolbox-agent.service"))
+        self.assertTrue(system.ran("systemctl", "restart", "privatetoolbox-agent"))
+        self.assertTrue(system.ran("systemctl", "restart", "privatechecker"))
+
+    def test_asks_first(self):
+        system = server(responses=[self.CHECKER_USER])
+        self.assertEqual(run(make_app(system, answers=["n"]), "integrate"), 1)
+        self.assertFalse(system.ran("groupadd"))
+
+    def test_remove_takes_everything_back(self):
+        system = server(responses=[self.CHECKER_USER])
+        app = make_app(system)
+        run(app, "integrate", "--yes")
+        self.assertEqual(run(app, "integrate", "--remove"), 0)
+        self.assertIsNone(system.read("/etc/systemd/system/privatetoolbox-agent.service"))
+        self.assertTrue(system.ran("gpasswd", "-d", "privatechecker", "privatetoolbox"))
+
+    def test_remove_when_not_enabled(self):
+        self.assertEqual(run(make_app(), "integrate", "--remove"), 1)
+
+    def test_already_enabled(self):
+        system = server(files={"/etc/systemd/system/privatetoolbox-agent.service": ""},
+                        responses=[self.CHECKER_USER])
+        app = make_app(system)
+        run(app, "integrate", "--yes")
+        self.assertIn("already enabled", output(app))
+        self.assertFalse(system.ran("groupadd"))
 
 
 if __name__ == "__main__":
