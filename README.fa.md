@@ -56,7 +56,7 @@ sudo privatetoolbox verify --iran           # بررسی کن همه چیز کا
 
 اگر ربات [PrivateChecker](https://github.com/Sorena-max/PrivateChecker) روی همین سرور اجرا میشود:
 
-- **گزارش:** بعد از `apply` یا `verify` ابزار متوجه میشود و میپرسد
+- **گزارش:** بعد از `scan` و `apply` و `verify` که دستی اجرا کنی ابزار متوجه میشود و میپرسد
   `Send this report to your Telegram bot? [y/N]`. بدون جواب مثبت (یا `--notify`) چیزی فرستاده نمیشود.
   گزارش فقط خلاصه و نتیجه بررسی ها را دارد، هرگز رمز، کلید یا توکن ندارد.
 - **دکمه در ربات:** `sudo privatetoolbox integrate` دکمه PrivateToolBox را به ربات اضافه میکند

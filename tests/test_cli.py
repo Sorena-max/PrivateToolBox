@@ -352,6 +352,45 @@ class IntegrateTests(unittest.TestCase):
         self.assertIn("already enabled", output(app))
         self.assertFalse(system.ran("groupadd"))
 
+class ScanReportTests(unittest.TestCase):
+    def ask(self, system, argv, answers, interactive=True):
+        app = make_app(system, answers=answers)
+        app.interactive = interactive
+        with mock.patch.object(notify, "send", return_value=True) as send:
+            run(app, *argv)
+        return app, send
+
+    def test_a_manual_scan_asks_to_send_the_result(self):
+        app, send = self.ask(checker_system(), ["scan"], ["y"])
+        self.assertTrue(send.called)
+        text = send.call_args[0][1]
+        self.assertIn("100", text)                          # "Score X of 100" in the bot language
+        self.assertIn("❌", text)                            # something to improve on a fresh server
+        self.assertIn("Send this report to your Telegram bot", "".join(app.asked))
+
+    def test_saying_no_sends_nothing(self):
+        _, send = self.ask(checker_system(), ["scan"], ["n"])
+        self.assertFalse(send.called)
+
+    def test_scan_does_not_ask_without_privatechecker(self):
+        app, send = self.ask(server(), ["scan"], ["y"])
+        self.assertEqual(app.asked, [])
+        self.assertFalse(send.called)
+
+    def test_scripted_scans_are_never_asked(self):
+        app, send = self.ask(checker_system(), ["scan"], ["y"], interactive=False)
+        self.assertEqual(app.asked, [])
+        self.assertFalse(send.called)
+
+    def test_flags(self):
+        _, send = self.ask(checker_system(), ["scan", "--notify"], [], interactive=False)
+        self.assertTrue(send.called)
+        _, send = self.ask(checker_system(), ["scan", "--no-notify"], ["y"])
+        self.assertFalse(send.called)
+
+    def test_the_menu_scan_asks_too(self):
+        app, send = self.ask(checker_system(), ["menu"], ["1", "y", "0"])
+        self.assertTrue(send.called)
 
 if __name__ == "__main__":
     unittest.main()

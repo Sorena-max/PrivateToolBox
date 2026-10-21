@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- `scan` now also offers to send its result to a running PrivateChecker bot, like `apply` and `verify`
+  (`--notify` sends without asking, `--no-notify` never asks)
+
 ## 0.1.0
 
 First release.

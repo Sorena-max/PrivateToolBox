@@ -40,7 +40,9 @@ def make_parser():
     integrate = sub.add_parser("integrate", help="add or remove the PrivateToolBox button in your PrivateChecker bot")
     integrate.add_argument("-y", "--yes", action="store_true")
     integrate.add_argument("--remove", action="store_true")
-    sub.add_parser("scan", help="read-only audit with a score")
+    scan = sub.add_parser("scan", help="read-only audit with a score")
+    scan.add_argument("--notify", action="store_true", help="send the result to PrivateChecker")
+    scan.add_argument("--no-notify", action="store_true", help="do not offer to send the result")
     sub.add_parser("menu", help="interactive menu")
     sub.add_parser("version")
     sub.add_parser("history", help="list past runs")
@@ -106,6 +108,7 @@ class App:
         self.engine = Engine(self.system)
         self.lang = "en"
         self.interactive = sys.stdin.isatty()
+        self.findings = []
 
     # helpers ----------------------------------------------------------
     def tr(self, key, **params):
@@ -163,7 +166,13 @@ class App:
         value = score(findings)
         self.ui.p("")
         self.ui.p("  %s  %s" % (self.tr("score"), self.ui.bar(value)))
+        self.findings = findings
         return value
+
+    def scan_cmd(self, args):
+        value = self.scan()
+        self.send_to_checker(args, lambda lang: integration.scan_report(lang, self.findings, value))
+        return 0
 
     # plan / apply -----------------------------------------------------
     def pick_modules(self, args):
@@ -445,7 +454,7 @@ class App:
                 self.ui.p("   %s) %s" % (key, self.tr(label)))
             choice = self.input_fn("> ").strip()
             if choice == "1":
-                self.scan()
+                self.scan_cmd(parser.parse_args(["scan"]))
             elif choice == "2":
                 self.apply_cmd(parser.parse_args(["apply", "--profile", "recommended"]))
             elif choice == "3":
@@ -470,8 +479,7 @@ def main(argv=None, app=None):
         print(__version__)
         return 0
     if command == "scan":
-        app.scan()
-        return 0
+        return app.scan_cmd(args)
     if command == "menu":
         return app.menu()
     if command == "plan":

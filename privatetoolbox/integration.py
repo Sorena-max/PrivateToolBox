@@ -41,6 +41,18 @@ def apply_report(lang, run_id, modules, before, after, results, held, code):
     return "\n".join(lines)
 
 
+def scan_report(lang, findings, value):
+    """Plain text summary of a scan: the score, then what is fine and what can be improved."""
+    lines = ["🧰 PrivateToolBox", t(lang, "n_host", host=socket.gethostname()),
+             t(lang, "n_scan"), t(lang, "n_score_now", value=value)]
+    for finding in findings:
+        if finding.status in ("ok", "todo"):
+            lines.append("%s %s: %s" % ("✅" if finding.status == "ok" else "❌",
+                                        t(lang, "mod_" + finding.module),
+                                        t(lang, finding.key, **finding.params)))
+    return "\n".join(lines)
+
+
 def verify_report(lang, results):
     good = all(ok for _, ok, _, _ in results)
     lines = ["🧰 PrivateToolBox", t(lang, "n_host", host=socket.gethostname()),

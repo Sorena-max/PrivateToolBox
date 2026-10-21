@@ -54,7 +54,7 @@ With `--yes` (for scripts) it keeps the changes only if every check passed, othe
 
 If a [PrivateChecker](https://github.com/Sorena-max/PrivateChecker) bot is running on the same server:
 
-- **Reports:** after `apply` or `verify`, PrivateToolBox notices it and asks
+- **Reports:** after `scan`, `apply` or `verify` run by hand, PrivateToolBox notices it and asks
   `Send this report to your Telegram bot? [y/N]`. Nothing is sent unless you say yes (or pass `--notify`).
   Reports contain a summary and check results, never passwords, keys or tokens.
 - **A button in the bot:** `sudo privatetoolbox integrate` adds a PrivateToolBox button to your bot

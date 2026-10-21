@@ -9,7 +9,7 @@
 
 set -Eeuo pipefail
 
-PT_VERSION="0.1.0"
+PT_VERSION="0.1.1"
 REPO_SLUG="Sorena-max/PrivateToolBox"
 APP_DIR="/opt/privatetoolbox"
 STATE_DIR="/var/lib/privatetoolbox"
