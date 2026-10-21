@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.10", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -t . -v
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint install.sh
+        run: |
+          bash -n install.sh
+          shellcheck --severity=warning install.sh
+
+  real-server:
+    # Runs the real tool on a clean Ubuntu machine: apply, check, undo.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: sudo bash install.sh --non-interactive --fast --local-source "$PWD" --lang en
+      - name: Read-only commands
+        run: |
+          sudo privatetoolbox version
+          sudo privatetoolbox scan
+          sudo privatetoolbox plan --profile all --dns keep
+          sudo privatetoolbox plan abuse --abuse-profile aggressive
+          sudo privatetoolbox history
+      - name: Apply the recommended set
+        run: |
+          sudo privatetoolbox apply --yes --profile recommended
+          sudo privatetoolbox history
+      - name: Settings are in place
+        run: |
+          test "$(sysctl -n net.ipv4.tcp_syncookies)" = "1"
+          test -f /etc/sysctl.d/91-privatetoolbox-net.conf
+          sudo ufw status | tee /dev/stderr | grep -q "Status: active"
+          sudo ufw status | grep -q "22/tcp"
+          systemctl is-active fail2ban
+          sudo privatetoolbox verify
+      - name: Undo
+        run: |
+          sudo privatetoolbox undo
+          test ! -e /etc/sysctl.d/91-privatetoolbox-net.conf
+          sudo ufw status | grep -q "Status: inactive"
+          sudo privatetoolbox history
+      - name: Uninstall
+        run: |
+          sudo privatetoolbox uninstall --purge
+          test ! -e /opt/privatetoolbox
+          test ! -e /usr/local/bin/privatetoolbox
